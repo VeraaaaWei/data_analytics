@@ -1,0 +1,16 @@
+CREATE TABLE account(
+user_id serial PRIMARY KEY,
+username VARCHAR(50) UNIQUE NOT NULL,
+password VARCHAR(50) NOT NULL,
+email VARCHAR(355) UNIQUE NOT NULL,
+last_login TIMESTAMP);
+
+Create table account1(
+Customer_ID serial PRIMARY KEY,
+First_name VARCHAR(20),
+Last_name VARCHAR (50) NOT NULL,
+Email_address VARCHAR (355),
+Address VARCHAR (50),
+City VARCHAR (50)NOT NULL,
+State VARCHAR (50) NOT NULL);
+
