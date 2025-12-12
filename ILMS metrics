@@ -1,0 +1,189 @@
+##############  ILMS Metrics & Prediction Programming  ########
+#######################  Author: Lai Wei  #####################
+
+import pandas as pd
+import numpy as np
+from datetime import datetime as dt
+
+########################   L1 Task   ##########################
+# Data processing
+data = pd.read_excel('*://*** //***.xlsx')
+data.drop(['Currency', 'Unit','Batch','Msg Type','Orig-Msg-Type','Status','Sender Ref','System Ref','Cust Ref','Priority','Critical'],axis=1,inplace=True)
+
+# Check whether the drop works
+#column_names_list = data.columns.tolist()
+#print(column_names_list)
+
+# Function categorize based on the payment type
+# Notice: In the raw data, "FED  Receive/ Send" under the "Payment Type" column means "FED Clearing Receive/ Send"
+def categorize(type):
+    if 'CHIPS' in type:
+        return 'CHIPS'
+    elif 'Security' in type:
+        return 'SECURITY'
+    else:
+        return 'FED'
+  
+# Apply the categorization
+data['Category'] = data['Payment Type'].apply(categorize)
+
+#Create new columns based on categories
+for Category in ['CHIPS', 'SECURITY', 'FED']:
+    data[Category] = data.apply(lambda row: row['Payment Type'] if row['Category'] == Category else '', axis=1)
+
+# Drop the temporary 'Category' column
+#data = data.drop('Category', axis=1)
+
+# Function to check if 'send' is in the description
+def is_send(text):
+    return 'send' in str(text).lower()
+
+# Apply the conversion
+data['Amount'] = data.apply(lambda row: -row['Amount'] if is_send(row['Payment Type']) else row['Amount'], axis=1)
+
+# Ensure the data is sorted by timestamp and convert the 'TIME STAMP' column to datetime
+data_sorted = data.sort_values(['TIME STAMP'])
+data_sorted['TIME STAMP'] = pd.to_datetime(data_sorted['TIME STAMP'])
+data_sorted['Period'] = data_sorted['TIME STAMP'].dt.to_period('s')
+
+data_sorted['usageCHIPS'] = data_sorted[data_sorted['Category'] == 'CHIPS'].groupby('Category')['Amount'].transform('cumsum')
+data_sorted['usageSECURITY'] = data_sorted[data_sorted['Category'] == 'SECURITY'].groupby('Category')['Amount'].transform('cumsum')
+data_sorted['usageFED'] = data_sorted[data_sorted['Category'] == 'FED'].groupby('Category')['Amount'].transform('cumsum')
+filtered_FS = data_sorted[data_sorted['Category'].isin(['FED' , 'SECURITY'])]
+filtered_FC = data_sorted[data_sorted['Category'].isin(['FED' , 'CHIPS'])]
+data_sorted['usageFS'] = filtered_FS['Amount'].transform('cumsum')
+data_sorted['usageFC'] = filtered_FC['Amount'].transform('cumsum')
+
+'''
+data_sorted['BaCHIPS'] = data_sorted[data_sorted['Category'] == 'CHIPS'].groupby('Category')['Balance'].transform('cumsum')
+data_sorted['BaSECURITY'] = data_sorted[data_sorted['Category'] == 'SECURITY'].groupby('Category')['Balance'].transform('cumsum')
+data_sorted['BaFED'] = data_sorted[data_sorted['Category'] == 'FED'].groupby('Category')['Balance'].transform('cumsum')
+filtered_FS = data_sorted[data_sorted['Category'].isin(['FED' , 'SECURITY'])]
+filtered_FC = data_sorted[data_sorted['Category'].isin(['FED' , 'CHIPS'])]
+data_sorted['BaFS'] = filtered_FS['Balance'].transform('cumsum')
+data_sorted['BaFC'] = filtered_FC['Balance'].transform('cumsum')
+'''
+
+'''
+#Check if the data is organized as we want
+print("\nDataFrame with cumulative sum:")
+print(data_sorted['sumFS'])
+print(data_sorted['sumFC'])
+print(data_sorted)
+print("\nData types:")
+print(data_sorted.dtypes)
+'''
+
+
+# Save the result to a excel file
+data_sorted.to_excel('*//*** //*** - Vera.xlsx', index=False)
+
+########################   L2 Task   ##########################
+
+# Set the date range
+start_date = '2024-08-02 20:00:00'  # !!!Replace with your desired start date
+start_date = pd.to_datetime(start_date).to_period('s')
+
+end_date = '2024-08-09 20:00:00'    # !!!Replace with your desired end date
+end_date = pd.to_datetime(end_date).to_period('s')
+
+# Filter the DataFrame for the specified date range
+mask = (data_sorted['Period'] >= start_date) & (data_sorted['Period'] <= end_date)
+data_filtered = data_sorted.loc[mask]
+
+# Group by date and find the minimum value in corresponding columns for each transaction day
+result_combined = data_filtered.groupby(['Value Date']).agg({
+    'usageCHIPS': ['min'],  
+    'usageSECURITY': ['min'],
+    'usageFED': ['min'],  
+    'usageFS': ['min'], 
+    'usageFC': ['min'],
+    'FS Balance': ['first']
+}).reset_index()
+
+'''
+result_combined = data_filtered.groupby(['Value Date']).agg({
+    'BaCHIPS': ['first'],     
+    'BaSECURITY': ['first'],
+    'BaFED': ['first'],    
+    'BaFS': ['first'],
+    'BaFC': ['first']
+}).reset_index()
+'''
+
+# Flatten the multi-level column names
+result_combined.columns = ['_'.join(col).strip() for col in result_combined.columns.values]
+
+# Rename the columns to distinguish between min and first
+result_combined = result_combined.rename(columns={
+    'Value Date_': 'Value Date',
+    'Category_': 'Category'
+})
+
+print(result_combined)
+
+#Metric calculation
+#amount
+#result_combined['CHIPSbalance'] = result_combined['BaCHIPS_first'] + result_combined['usageCHIPS_min']
+#result_combined['SECURITYbalance'] = result_combined['BaSECURITY_first'] + result_combined['usageSECURITY_min']
+#result_combined['FEDbalance'] = result_combined['BaFED_first'] + result_combined['usageFED_min']
+result_combined['F&Sbalance'] = result_combined['FS Balance_first'] + result_combined['usageFS_min']
+#result_combined['F&Cbalance'] = result_combined['BaFC_first'] + result_combined['usageFC_min']
+
+#ratio
+#result_combined['CHIPSratio'] = result_combined['usageCHIPS_min'] / result_combined['BaCHIPS_first']
+#result_combined['SECURITYratio'] = result_combined['usageSECURITY_min'] / result_combined['BaSECURITY_first']
+#result_combined['FEDratio'] = result_combined['usageFED_min'] / result_combined['BaFED_first']
+result_combined['F&Sratio'] = result_combined['usageFS_min'] / result_combined['FS Balance_first']
+#result_combined['F&Cratio'] = result_combined['usageFC_min'] / result_combined['BaFC_first']
+
+#Create risk limit threshold
+#balanceCUTOFF1 trigger when amount <=4b, balanceCUTOFF2 trigger when amount <=2b, balanceCUTOFF3 trigger when amount <=0
+'''
+result_combined['CHIPSbalanceCUTOFF1'] = np.where(result_combined['CHIPSbalance'] >= 4000000000, 0, 1)
+result_combined['CHIPSbalanceCUTOFF2'] = np.where(result_combined['CHIPSbalance'] >= 2000000000, 0, 1)
+result_combined['CHIPSbalanceCUTOFF3'] = np.where(result_combined['CHIPSbalance'] >= 0, 0, 1)
+result_combined['SECURITYbalanceCUTOFF1'] = np.where(result_combined['SECURITYbalance'] >= 4000000000, 0, 1)
+result_combined['SECURITYbalanceCUTOFF2'] = np.where(result_combined['SECURITYbalance'] >= 2000000000, 0, 1)
+result_combined['SECURITYbalanceCUTOFF3'] = np.where(result_combined['SECURITYbalance'] >= 0, 0, 1)
+result_combined['FEDusagebalanceCUTOFF1'] = np.where(result_combined['FEDbalance'] >= 4000000000, 0, 1)
+result_combined['FEDusagebalanceCUTOFF2'] = np.where(result_combined['FEDbalance'] >= 2000000000, 0, 1)
+result_combined['FEDusagebalanceCUTOFF3'] = np.where(result_combined['FEDbalance'] >= 0, 0, 1)
+'''
+result_combined['FSusagebalanceCUTOFF1'] = np.where(result_combined['F&Sbalance'] >= 4000000000, 0, 1)
+result_combined['FSusagebalanceCUTOFF2'] = np.where(result_combined['F&Sbalance'] >= 2000000000, 0, 1)
+result_combined['FSusagebalanceCUTOFF3'] = np.where(result_combined['F&Sbalance'] >= 0, 0, 1)
+'''
+result_combined['FCusagebalanceCUTOFF1'] = np.where(result_combined['F&Cbalance'] >= 4000000000, 0, 1)
+result_combined['FCusagebalanceCUTOFF2'] = np.where(result_combined['F&Cbalance'] >= 2000000000, 0, 1)
+result_combined['FCusagebalanceCUTOFF3'] = np.where(result_combined['F&Cbalance'] >= 0, 0, 1)
+'''
+
+#ratioCUTOFF1 trigger when ratio >=80%, ratioCUTOFF2 trigger when ratio >=90%, ratioCUTOFF3 trigger when ratio >=100%
+'''
+result_combined['CHIPSratioCUTOFF1'] = np.where(result_combined['CHIPSratio'] <= 0.8, 0, 1)
+result_combined['CHIPSratioCUTOFF2'] = np.where(result_combined['CHIPSratio'] <= 0.9, 0, 1)
+result_combined['CHIPSratioCUTOFF3'] = np.where(result_combined['CHIPSratio'] <=1, 0, 1)
+result_combined['SECURITYratioCUTOFF1'] = np.where(result_combined['SECURITYratio'] <= 0.8, 0, 1)
+result_combined['SECURITYratioCUTOFF2'] = np.where(result_combined['SECURITYratio'] <= 0.9, 0, 1)
+result_combined['SECURITYratioCUTOFF3'] = np.where(result_combined['SECURITYratio'] <=1, 0, 1)
+result_combined['FEDusageratioCUTOFF1'] = np.where(result_combined['FEDratio'] <= 0.8, 0, 1)
+result_combined['FEDusageratioCUTOFF2'] = np.where(result_combined['FEDratio'] <= 0.9, 0, 1)
+result_combined['FEDusageratioCUTOFF3'] = np.where(result_combined['FEDratio'] <=1, 0, 1)
+'''
+result_combined['FSusageratioCUTOFF1'] = np.where(result_combined['F&Sratio'] <= 0.8, 0, 1)
+result_combined['FSusageratioCUTOFF2'] = np.where(result_combined['F&Sratio'] <= 0.9, 0, 1)
+result_combined['FSusageratioCUTOFF3'] = np.where(result_combined['F&Sratio'] <=1, 0, 1)
+'''
+result_combined['FCusageratioCUTOFF1'] = np.where(result_combined['F&Cratio'] <= 0.8, 0, 1)
+result_combined['FCusageratioCUTOFF2'] = np.where(result_combined['F&Cratio'] <= 0.9, 0, 1)
+result_combined['FCusageratioCUTOFF3'] = np.where(result_combined['F&Cratio'] <=1, 0, 1)
+'''
+
+# Print the result
+print(result_combined)
+
+# Save the result to a new CSV file
+result_combined.to_excel('*://***// Vera - Metrics.xlsx', index=False)
+
+
